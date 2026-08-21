@@ -31,17 +31,16 @@ input[type=text]{width:100%;max-width:420px}
 button{font:inherit;padding:7px 16px;border:1px solid var(--line);border-radius:4px;
   background:#fff;cursor:pointer}
 button:hover{background:#f0f2f5}
+/* 動作按鈕一律為實體色塊，白底外框只留給精靈的「上一步」 */
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.primary:hover{filter:brightness(1.1)}
-button.danger{color:var(--bad);border-color:var(--bad)}
+button.secondary{background:#59616e;border-color:#59616e;color:#fff}
+button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+button.primary:hover,button.secondary:hover,button.danger:hover{filter:brightness(1.12)}
 .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .actions.right{justify-content:flex-end}
-/* 標題列：標題與說明靠左，清除分數按鈕靠右 */
-.cardhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
-.cardhead button{flex:none;white-space:nowrap}
-.cardhead .hint{margin-bottom:8px}
-.lvtoggle{font-weight:600;margin-bottom:2px}
-.lvhint{margin:0 0 10px 22px;max-width:760px}
+/* 清除分數貼在表格上緣右側 */
+.toolbar{display:flex;justify-content:flex-end;margin-bottom:2px}
+.toolbar button{white-space:nowrap}
 .msg{margin-top:10px;padding:8px 10px;border-radius:4px;font-size:14px}
 .msg.bad{background:#fdecea;color:var(--bad)}
 .msg.warn{background:#fdf3e0;color:var(--warn)}
@@ -52,8 +51,6 @@ th{background:#f0f2f5;font-weight:600}
 td.numcol,th.numcol{text-align:right;white-space:nowrap}
 tr.total-row td{background:var(--readonly);font-weight:700}
 .score{width:78px;text-align:right}
-.level{display:block;margin:4px 0 0 auto;padding:2px 4px;font-size:13px;width:78px}
-.hide-levels .level{display:none}
 .tablewrap{overflow-x:auto}
 .err{color:var(--bad);font-size:12px;margin-top:2px}
 .badge{font-size:13px;font-weight:400;white-space:nowrap}
@@ -61,6 +58,10 @@ tr.total-row td{background:var(--readonly);font-weight:700}
 .badge.pass{color:var(--ok)}
 .gap{font-weight:700}
 .gap.zero{color:var(--ok)}
+/* 合計與目標分對不上時，整格標成警示色 */
+.gap.diff{color:var(--warn)}
+td.gapwarn{background:#fdf3e0;border-color:#e3c98a}
+.gapnote{display:block;font-size:12px;font-weight:400;color:var(--warn)}
 /* 目標分為選填欄位，用底色與框線標出來，讓人看得出這裡可以打字 */
 tr.target-row td{background:#eaf2fb}
 tr.target-row input[data-target]{border:2px solid var(--accent);background:#fff;font-weight:600}
@@ -87,10 +88,8 @@ ul.plain li{margin:2px 0}
 "use strict";
 
 /* ===================== 常數 ===================== */
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const APP_DATE    = '2026-08-21';
-const LEVEL_RANK  = { strong:3, mid:2, weak:1 };
-const LEVEL_LABEL = { strong:'強', mid:'中', weak:'弱' };
 const STEM        = '甲乙丙丁戊己庚辛壬癸';
 
 /* ===================== 共用工具 ===================== */
@@ -116,7 +115,7 @@ function pad(n){ return String(n).padStart(2, '0'); }
 
 /* 建立空狀態。raw / rawTarget 存使用者輸入的原始字串，其餘皆由此推導。 */
 function makeState(config){
-  return { config:config, raw:{}, rawTarget:{}, levels:{}, showLevels:false };
+  return { config:config, raw:{}, rawTarget:{} };
 }
 
 /* V-05：各項配分合計須等於 totalPoints */
@@ -218,29 +217,6 @@ function cellErrors(st){
     for (const c of st.config.criteria){
       const e = validateScore(st.raw[ck(v.id, c.id)], c.maxScore);
       if (e) out.push(v.label + '／' + c.name + '：' + e);
-    }
-  }
-  return out;
-}
-
-/* F-06：以委員自填的強／中／弱做序位比對，不做語意分析 */
-function consistencyHints(st){
-  const out = [];
-  for (const c of st.config.criteria){
-    const marked = st.config.vendors
-      .map(v => ({ v:v, lv:st.levels[ck(v.id, c.id)] || '', sc:scoreOf(st, v.id, c.id) }))
-      .filter(x => x.lv && x.sc !== null);
-    for (let i = 0; i < marked.length; i++){
-      for (let j = 0; j < marked.length; j++){
-        if (i === j) continue;
-        const a = marked[i], b = marked[j];
-        if (LEVEL_RANK[a.lv] <= LEVEL_RANK[b.lv]) continue;   // 只從等級較高者看出去
-        if (a.sc > b.sc) continue;                            // 分數也較高，無矛盾
-        out.push('「' + c.name + '」：' +
-          a.v.label + '（' + LEVEL_LABEL[a.lv] + '）' + a.sc + ' 分、' +
-          b.v.label + '（' + LEVEL_LABEL[b.lv] + '）' + b.sc + ' 分，' +
-          (a.sc === b.sc ? '等級不同但分數相同，請確認。' : '等級較高但分數較低，請確認。'));
-      }
     }
   }
   return out;
@@ -521,9 +497,6 @@ function renderScoring(){
     cfg.vendors.map(v =>
       '<td class="numcol">' +
         '<input class="score" type="text" inputmode="decimal" data-v="' + v.id + '" data-c="' + c.id + '">' +
-        '<select class="level" data-v="' + v.id + '" data-c="' + c.id + '" title="強弱標記（選用）">' +
-          '<option value="">—</option><option value="strong">強</option>' +
-          '<option value="mid">中</option><option value="weak">弱</option></select>' +
         '<div class="err" data-err="' + ck(v.id, c.id) + '"></div>' +
       '</td>').join('') + '</tr>').join('');
 
@@ -544,26 +517,18 @@ function renderScoring(){
 
   app().innerHTML =
     '<div class="card">' +
-      '<div class="cardhead">' +
-        '<div>' +
-          '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
-          '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
-            '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯' +
-            '<br>要重新設定評分項目或配分，請重新整理頁面（資料不會留存）</p>' +
-        '</div>' +
+      '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
+      '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
+        '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯' +
+        '<br>要重新設定評分項目或配分，請重新整理頁面（資料不會留存）</p>' +
+      '<div class="toolbar">' +
         '<button class="danger" id="reset" title="只清除分數，設定保留">清除分數</button>' +
       '</div>' +
-      '<label class="lvtoggle"><input type="checkbox" id="togglelv"> ' +
-        '幫我檢查給分有沒有前後矛盾（選用）</label>' +
-      '<p class="hint lvhint">勾選後，每格分數旁會多一個「強／中／弱」小選單。' +
-        '假設你標甲這項「中」、乙這項「弱」，卻給乙比較高分，系統就會提醒你確認一下。' +
-        '標記純粹給你自己對照用，不影響任何計算，也不會出現在匯出的檔案裡。</p>' +
-      '<div class="tablewrap"><table id="grid" class="hide-levels"><tr>' + head + '</tr>' +
+      '<div class="tablewrap"><table id="grid"><tr>' + head + '</tr>' +
         bodyRows + totalRow + targetRow + gapRow + '</table></div>' +
       '<div id="warnings"></div>' +
-      '<div id="hints"></div>' +
       '<div class="actions right">' +
-        '<button id="exp-copy">複製到剪貼簿</button>' +
+        '<button class="secondary" id="exp-copy">複製到剪貼簿</button>' +
         '<button class="primary" id="exp-md">下載 Markdown</button>' +
         '<button class="primary" id="exp-csv">下載 CSV</button>' +
       '</div>' +
@@ -577,13 +542,6 @@ function renderScoring(){
       refresh();
     });
   });
-  $$('.level').forEach(el => {
-    el.value = state.levels[ck(el.dataset.v, el.dataset.c)] || '';
-    el.addEventListener('change', () => {
-      state.levels[ck(el.dataset.v, el.dataset.c)] = el.value;
-      refresh();
-    });
-  });
   $$('[data-target]').forEach(el => {
     el.value = state.rawTarget[el.dataset.target] || '';
     el.addEventListener('input', () => {
@@ -592,13 +550,6 @@ function renderScoring(){
     });
   });
   $$('[data-fill]').forEach(btn => btn.addEventListener('click', () => doFill(btn.dataset.fill)));
-  /* 重繪後沿用原本的開關狀態，避免清除分數時標記欄自己收起來 */
-  $('#togglelv').checked = state.showLevels;
-  $('#grid').classList.toggle('hide-levels', !state.showLevels);
-  $('#togglelv').addEventListener('change', e => {
-    state.showLevels = e.target.checked;
-    $('#grid').classList.toggle('hide-levels', !state.showLevels);
-  });
   $('#exp-csv').addEventListener('click', () => doExport('csv'));
   $('#exp-md').addEventListener('click', () => doExport('md'));
   $('#exp-copy').addEventListener('click', () => doExport('copy'));
@@ -629,11 +580,17 @@ function refresh(){
 
     const t = targetOf(state, v.id);
     const gapEl = document.querySelector('[data-gap="' + v.id + '"]');
-    if (t === null){ gapEl.textContent = ''; gapEl.className = 'gap'; }
-    else {
+    const gapCell = gapEl.parentNode;
+    if (t === null){
+      gapEl.textContent = ''; gapEl.className = 'gap';
+      gapCell.classList.remove('gapwarn');
+    } else {
       const g = gapOf(t, total);
-      gapEl.className = 'gap' + (g === 0 ? ' zero' : '');
-      gapEl.textContent = g === 0 ? '✓ 已對齊' : signed(g);
+      const aligned = g === 0;
+      gapEl.className = 'gap ' + (aligned ? 'zero' : 'diff');
+      gapEl.innerHTML = aligned ? '✓ 已對齊'
+        : signed(g) + '<span class="gapnote">合計與目標分不一致</span>';
+      gapCell.classList.toggle('gapwarn', !aligned);
     }
   }
 
@@ -641,11 +598,6 @@ function refresh(){
   $('#warnings').innerHTML = errs.length
     ? '<div class="msg bad"><strong>請先修正以下輸入：</strong><ul class="plain">' +
       errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>' : '';
-
-  const hints = consistencyHints(state);
-  $('#hints').innerHTML = hints.length
-    ? '<div class="msg warn"><strong>一致性提示（不阻擋作業）：</strong><ul class="plain">' +
-      hints.map(h => '<li>' + esc(h) + '</li>').join('') + '</ul></div>' : '';
 
   /* 沒填目標分就沒有東西可拆，按鈕保持停用 */
   $$('[data-fill]').forEach(btn => {
@@ -735,11 +687,10 @@ function fallbackCopy(text){
    只清掉填進去的東西，設定一律保留——現場最常見的是「這家重打一次」，
    不是「整份重新設定」。要重設項目與配分，重新整理頁面即可。 */
 function doClearScores(){
-  if (!window.confirm('將清除所有已填分數、目標分與強弱標記。' +
+  if (!window.confirm('將清除所有已填分數與目標分。' +
       '評分項目、配分、廠商與門檻等設定會保留。此動作無法復原，確定嗎？')) return;
   state.raw = {};
   state.rawTarget = {};
-  state.levels = {};
   renderScoring();
   $('#exportmsg').innerHTML = '<div class="msg ok">已清除所有分數，設定保留。</div>';
 }
@@ -791,11 +742,6 @@ function runSelfTest(){
     !document.querySelector('input[data-total]'), totalCell ? totalCell.tagName : '未渲染');
   /* T-11 */ add('T-11', '配分合計覆寫為 110，各項 50/30/20/10',
     validateAllotments([50,30,20,10], 110).ok === true, '通過');
-  /* T-12 */ const s12 = makeState(sampleConfig());
-  fill(s12, 1, [41,19,13,8]); fill(s12, 3, [44,21,13,8]);
-  s12.levels[ck(1,4)] = 'mid'; s12.levels[ck(3,4)] = 'weak';
-  const h12 = consistencyHints(s12);
-  add('T-12', '甲（中）8 分、丙（弱）8 分 → 一致性提示', h12.length === 1, h12[0] || '無提示');
   /* T-13 */ const csv = buildCsv(s9);
   add('T-13', 'CSV 首字元為 BOM、換行為 CRLF',
     csv.charCodeAt(0) === 0xFEFF && !/[^\r]\n/.test(csv) && csv.indexOf('\r\n') > 0, '合格');
