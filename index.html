@@ -78,7 +78,7 @@ ul.plain li{margin:2px 0}
 "use strict";
 
 /* ===================== 常數 ===================== */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const APP_DATE    = '2026-08-21';
 const SAMPLE_NOTE = '※ 本表為範例／模擬資料，非實際評選結果';
 const LEVEL_RANK  = { strong:3, mid:2, weak:1 };
@@ -348,13 +348,13 @@ const STEPS = [
     if (v !== d.n){ d.names = []; d.maxScores = []; }
     d.n = v; return null; } },
 
-{ /* Q2 */ title:'Q2　依序輸入各項名稱', hint:'不得空白、不得重複。',
+{ /* Q2 */ title:'Q2　依序輸入各項名稱', hint:'可全部留空直接下一步，留空者自動命名為「項目 1」「項目 2」。名稱只影響畫面與匯出表格，不影響計算；自行填寫時不得重複。',
   body: d => Array.from({ length:d.n }, (_, i) =>
-      '<label>第 ' + (i + 1) + ' 項</label><input type="text" class="f" value="' +
-      esc(d.names[i] || '') + '">').join(''),
+      '<label>第 ' + (i + 1) + ' 項</label><input type="text" class="f" placeholder="項目 ' +
+      (i + 1) + '（可留空）" value="' + esc(d.names[i] || '') + '">').join(''),
   commit: d => {
-    const vals = $$('.f').map(e => e.value.trim());
-    if (vals.some(v => v === '')) return '各項名稱不得空白';
+    /* 留空者自動命名：這是算分工具，項目名稱不該卡住流程 */
+    const vals = $$('.f').map((e, i) => e.value.trim() || '項目 ' + (i + 1));
     if (new Set(vals).size !== vals.length) return '各項名稱不得重複';
     d.names = vals; return null; } },
 
