@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>評選評分表驗算助手</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#fff; --line:#d8dce2; --text:#1c1f23; --muted:#616b78;
+  --bad:#b3261e; --warn:#8a5a00; --ok:#1a6b3c; --accent:#1b4f8a; --readonly:#eef0f3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Microsoft JhengHei","PingFang TC","Noto Sans TC",system-ui,sans-serif;
+  font-size:15px;line-height:1.6}
+header,footer{padding:12px 20px}
+header{background:#fff;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:18px}
+header .sub{color:var(--muted);font-size:13px}
+footer{color:var(--muted);font-size:12px;text-align:center}
+main{max-width:1040px;margin:0 auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:18px;margin-bottom:16px}
+h2{font-size:17px;margin:0 0 4px}
+.hint{color:var(--muted);font-size:13px;margin:0 0 14px}
+label{display:block;margin:8px 0 4px;font-size:14px}
+input[type=text],input[type=number],select{
+  font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:#fff}
+input[type=text]{width:100%;max-width:420px}
+.row{display:flex;flex-wrap:wrap;gap:10px}
+.row>div{min-width:200px;flex:1}
+button{font:inherit;padding:7px 16px;border:1px solid var(--line);border-radius:4px;
+  background:#fff;cursor:pointer}
+button:hover{background:#f0f2f5}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{filter:brightness(1.1)}
+button.danger{color:var(--bad);border-color:var(--bad)}
+.actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.msg{margin-top:10px;padding:8px 10px;border-radius:4px;font-size:14px}
+.msg.bad{background:#fdecea;color:var(--bad)}
+.msg.warn{background:#fdf3e0;color:var(--warn)}
+.msg.ok{background:#e9f5ee;color:var(--ok)}
+table{border-collapse:collapse;width:100%;margin-top:8px}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f0f2f5;font-weight:600}
+td.numcol,th.numcol{text-align:right;white-space:nowrap}
+tr.total-row td{background:var(--readonly);font-weight:700}
+.score{width:78px;text-align:right}
+.level{display:block;margin:4px 0 0 auto;padding:2px 4px;font-size:13px;width:78px}
+.hide-levels .level{display:none}
+.tablewrap{overflow-x:auto}
+.err{color:var(--bad);font-size:12px;margin-top:2px}
+.badge{font-size:13px;font-weight:400;white-space:nowrap}
+.badge.fail{color:var(--bad)}
+.badge.alert{color:var(--warn)}
+.badge.pass{color:var(--ok)}
+.gap{font-weight:700}
+.gap.zero{color:var(--ok)}
+.space-block{margin-top:14px;border-top:1px dashed var(--line);padding-top:10px}
+.space-block h3{font-size:14px;margin:0 0 4px}
+.sample-banner{background:#fdf3e0;color:var(--warn);border:1px solid #e3c98a;
+  padding:8px 12px;border-radius:4px;margin-bottom:16px;font-weight:600}
+ul.plain{margin:6px 0 0;padding-left:20px}
+ul.plain li{margin:2px 0}
+.mono{font-family:Consolas,"Courier New",monospace;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>評選評分表驗算助手</h1>
+  <div class="sub">逐項填、自動加總、當場抓錯。純前端、可離線、不連網、不存檔。</div>
+</header>
+<main id="app"></main>
+<footer>
+  <span id="ver"></span>　｜　本工具為評分輔助與驗算用途，正式評選紀錄以機關制式表格與委員簽名為準。
+</footer>
+
+<script>
+"use strict";
+
+/* ===================== 常數 ===================== */
+const APP_VERSION = '1.0.0';
+const APP_DATE    = '2026-08-21';
+const SAMPLE_NOTE = '※ 本表為範例／模擬資料，非實際評選結果';
+const LEVEL_RANK  = { strong:3, mid:2, weak:1 };
+const LEVEL_LABEL = { strong:'強', mid:'中', weak:'弱' };
+const STEM        = '甲乙丙丁戊己庚辛壬癸';
+
+/* ===================== 共用工具 ===================== */
+const $  = s => document.querySelector(s);
+const $$ = s => Array.prototype.slice.call(document.querySelectorAll(s));
+const app = () => $('#app');
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+function toNum(v){
+  const s = String(v == null ? '' : v).trim();
+  if (s === '') return NaN;
+  return Number(s);
+}
+function ck(vid, cid){ return vid + ':' + cid; }
+function signed(n){ return (n > 0 ? '+' : '') + round2(n); }
+function pad(n){ return String(n).padStart(2, '0'); }
+
+/* ===================== 純函式層（selftest 直接呼叫） ===================== */
+
+/* 建立空狀態。raw / rawTarget 存使用者輸入的原始字串，其餘皆由此推導。 */
+function makeState(config){
+  return { config:config, raw:{}, rawTarget:{}, levels:{}, showLevels:false };
+}
+
+/* V-05：各項配分合計須等於 totalPoints */
+function validateAllotments(maxScores, totalPoints){
+  for (const m of maxScores){
+    if (!isFinite(m) || m <= 0) return { ok:false, msg:'各項配分須為大於 0 的數字' };
+  }
+  const sum = round2(maxScores.reduce((a, b) => a + b, 0));
+  if (sum !== totalPoints){
+    return { ok:false, sum:sum,
+      msg:'目前合計 ' + sum + ' 分，與 ' + totalPoints + ' 分相差 ' +
+          round2(Math.abs(totalPoints - sum)) + ' 分' };
+  }
+  return { ok:true, sum:sum };
+}
+
+/* V-01～V-03：單格給分驗算。未填回傳 null（缺漏由 V-04 於匯出前處理）。 */
+function validateScore(raw, maxScore){
+  const s = String(raw == null ? '' : raw).trim();
+  if (s === '') return null;
+  const v = Number(s);
+  if (!isFinite(v)) return '請輸入數字';
+  if (v < 0)        return '給分不得為負';
+  if (v > maxScore) return '本項上限 ' + maxScore + ' 分';
+  return null;
+}
+
+function scoreOf(st, vid, cid){
+  const s = String(st.raw[ck(vid, cid)] || '').trim();
+  if (s === '') return null;
+  const v = Number(s);
+  return isFinite(v) ? v : null;
+}
+
+/* 合計＝各項加總（V-07：系統計算，不接受外部輸入） */
+function totalOf(st, vid){
+  let sum = 0;
+  for (const c of st.config.criteria){
+    const v = scoreOf(st, vid, c.id);
+    if (v !== null) sum += v;
+  }
+  return round2(sum);
+}
+
+/* F-04 門檻標示 */
+function statusOf(total, threshold, margin){
+  if (total < threshold) return 'fail';
+  if (total <= threshold + margin) return 'alert';
+  return 'pass';
+}
+function statusText(s){
+  return s === 'fail' ? '未達門檻' : s === 'alert' ? '提醒區間' : '通過';
+}
+
+/* F-05：差距 ＝ 目標分 − 合計 */
+function gapOf(target, total){ return round2(target - total); }
+
+function targetOf(st, vid){
+  const s = String(st.rawTarget[vid] || '').trim();
+  if (s === '') return null;
+  const v = Number(s);
+  if (!isFinite(v) || v < 0 || v > st.config.totalPoints) return null;
+  return v;
+}
+
+/* V-04：匯出前檢查缺漏 */
+function missingCells(st){
+  const out = [];
+  for (const v of st.config.vendors){
+    for (const c of st.config.criteria){
+      if (String(st.raw[ck(v.id, c.id)] || '').trim() === ''){
+        out.push(v.label + '／' + c.name);
+      }
+    }
+  }
+  return out;
+}
+
+/* 現存的 V-01～V-03 錯誤 */
+function cellErrors(st){
+  const out = [];
+  for (const v of st.config.vendors){
+    for (const c of st.config.criteria){
+      const e = validateScore(st.raw[ck(v.id, c.id)], c.maxScore);
+      if (e) out.push(v.label + '／' + c.name + '：' + e);
+    }
+  }
+  return out;
+}
+
+/* F-06：以委員自填的強／中／弱做序位比對，不做語意分析 */
+function consistencyHints(st){
+  const out = [];
+  for (const c of st.config.criteria){
+    const marked = st.config.vendors
+      .map(v => ({ v:v, lv:st.levels[ck(v.id, c.id)] || '', sc:scoreOf(st, v.id, c.id) }))
+      .filter(x => x.lv && x.sc !== null);
+    for (let i = 0; i < marked.length; i++){
+      for (let j = 0; j < marked.length; j++){
+        if (i === j) continue;
+        const a = marked[i], b = marked[j];
+        if (LEVEL_RANK[a.lv] <= LEVEL_RANK[b.lv]) continue;   // 只從等級較高者看出去
+        if (a.sc > b.sc) continue;                            // 分數也較高，無矛盾
+        out.push('「' + c.name + '」：' +
+          a.v.label + '（' + LEVEL_LABEL[a.lv] + '）' + a.sc + ' 分、' +
+          b.v.label + '（' + LEVEL_LABEL[b.lv] + '）' + b.sc + ' 分，' +
+          (a.sc === b.sc ? '等級不同但分數相同，請確認。' : '等級較高但分數較低，請確認。'));
+      }
+    }
+  }
+  return out;
+}
+
+/* 名次字串 */
+function rankLine(st){
+  const cfg = st.config;
+  const rows = cfg.vendors.map(v => {
+    const t = totalOf(st, v.id);
+    return { label:v.label, total:t, st:statusOf(t, cfg.passThreshold, cfg.alertMargin) };
+  }).sort((a, b) => b.total - a.total);
+  return rows.map(r => r.label + '（' + r.total + (r.st === 'fail' ? '，不入選' : '') + '）')
+             .join('→ ');
+}
+
+/* --------- 匯出 --------- */
+function csvCell(s){
+  s = String(s == null ? '' : s);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/* CSV：UTF-8 with BOM、CRLF；不加 BOM 時 Windows 版 Excel 開中文會亂碼 */
+function buildCsv(st){
+  const cfg = st.config, rows = [];
+  if (cfg.isSampleMode) rows.push([SAMPLE_NOTE]);
+  rows.push(['項目', '配分'].concat(cfg.vendors.map(v => v.label)));
+  for (const c of cfg.criteria){
+    rows.push([c.name, c.maxScore].concat(
+      cfg.vendors.map(v => { const s = scoreOf(st, v.id, c.id); return s === null ? '' : s; })));
+  }
+  rows.push(['合計', cfg.totalPoints].concat(cfg.vendors.map(v => totalOf(st, v.id))));
+
+  const targets = cfg.vendors.map(v => targetOf(st, v.id));
+  if (targets.some(t => t !== null)){
+    rows.push(['目標分', ''].concat(targets.map(t => t === null ? '' : t)));
+    rows.push(['差距', ''].concat(cfg.vendors.map((v, i) =>
+      targets[i] === null ? '' : gapOf(targets[i], totalOf(st, v.id)))));
+  }
+  rows.push(['狀態', ''].concat(cfg.vendors.map(v =>
+    statusText(statusOf(totalOf(st, v.id), cfg.passThreshold, cfg.alertMargin)))));
+
+  return '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+function buildMarkdown(st, now){
+  const cfg = st.config;
+  const d = now || new Date();
+  const time = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+               ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const L = [];
+  if (cfg.isSampleMode) L.push(SAMPLE_NOTE, '');
+  L.push('## 評分表' + (cfg.caseName ? '：' + cfg.caseName : ''), '');
+  L.push('匯出時間：' + time);
+  L.push('及格門檻：' + cfg.passThreshold + ' 分' + (cfg.alertMargin > 0
+    ? '（提醒區間 ' + cfg.passThreshold + '–' + round2(cfg.passThreshold + cfg.alertMargin) + '）' : ''));
+  L.push('');
+  L.push('| 項目 | 配分 | ' + cfg.vendors.map(v => v.label).join(' | ') + ' |');
+  L.push('|---|---|' + cfg.vendors.map(() => '---|').join(''));
+  for (const c of cfg.criteria){
+    L.push('| ' + c.name + ' | ' + c.maxScore + ' | ' +
+      cfg.vendors.map(v => { const s = scoreOf(st, v.id, c.id); return s === null ? '' : s; }).join(' | ') + ' |');
+  }
+  L.push('| **合計** | **' + cfg.totalPoints + '** | ' + cfg.vendors.map(v => {
+    const t = statusOf(totalOf(st, v.id), cfg.passThreshold, cfg.alertMargin);
+    return '**' + totalOf(st, v.id) + '**' + (t === 'fail' ? ' ✕' : t === 'alert' ? ' ⚠' : '');
+  }).join(' | ') + ' |');
+  L.push('');
+  for (const v of cfg.vendors){
+    const t = totalOf(st, v.id), s = statusOf(t, cfg.passThreshold, cfg.alertMargin);
+    if (s === 'alert') L.push('⚠ ' + v.label + ' ' + t + ' 分，落在提醒區間（' +
+      cfg.passThreshold + '–' + round2(cfg.passThreshold + cfg.alertMargin) + '）');
+    if (s === 'fail')  L.push('✕ ' + v.label + ' ' + t + ' 分，未達門檻 ' + cfg.passThreshold + ' 分');
+  }
+  const withTarget = cfg.vendors.filter(v => targetOf(st, v.id) !== null);
+  if (withTarget.length){
+    L.push('');
+    L.push('目標分僅供對帳參考，本表以合計（細項加總）為準：' + withTarget.map(v => {
+      const t = targetOf(st, v.id);
+      return v.label + ' ' + t + '（差距 ' + signed(gapOf(t, totalOf(st, v.id))) + '）';
+    }).join('、'));
+  }
+  L.push('');
+  L.push('名次：' + rankLine(st));
+  return L.join('\n') + '\n';
+}
+
+function sanitizeName(s){
+  return String(s || '').replace(/[\\/:*?"<>|]/g, '_')
+                        .replace(/[\u0000-\u001f]/g, '_').trim();
+}
+function stamp(now){
+  const d = now || new Date();
+  return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+         '_' + pad(d.getHours()) + pad(d.getMinutes());
+}
+function csvFilename(st, now){
+  const n = sanitizeName(st.config.caseName);
+  return '評分表_' + (n ? n + '_' : '') + stamp(now) + '.csv';
+}
+function mdFilename(st, now){
+  const n = sanitizeName(st.config.caseName);
+  return '評分表_' + (n ? n + '_' : '') + stamp(now) + '.md';
+}
+
+/* ===================== 應用狀態 ===================== */
+let state = null;
+let wiz = null;
+
+function newWiz(){
+  return { step:0, error:'', d:{
+    caseName:'', n:null, names:[], totalPoints:100, maxScores:[],
+    vendorCount:null, vendorLabels:[], passThreshold:null, alertMargin:2, isSampleMode:false
+  }};
+}
+function defaultLabel(i){ return i < STEM.length ? STEM[i] : '廠商' + (i + 1); }
+
+/* ===================== 設定精靈（F-01） ===================== */
+const STEPS = [
+{ /* Q0 */ title:'Q0　案名？', hint:'可留空。僅用於匯出檔名與標題，不影響計算。',
+  body: d => '<input type="text" id="f" value="' + esc(d.caseName) + '" placeholder="例：潮州二期公共藝術 A-2">',
+  commit: d => { d.caseName = $('#f').value.trim(); return null; } },
+
+{ /* Q1 */ title:'Q1　共有幾個評分項目？', hint:'1 至 10 項。',
+  body: d => '<input type="number" id="f" min="1" max="10" step="1" value="' + (d.n == null ? '' : d.n) + '">',
+  commit: d => {
+    const v = toNum($('#f').value);
+    if (!Number.isInteger(v) || v < 1 || v > 10) return '評分項目數須為 1 至 10 之整數';
+    if (v !== d.n){ d.names = []; d.maxScores = []; }
+    d.n = v; return null; } },
+
+{ /* Q2 */ title:'Q2　依序輸入各項名稱', hint:'不得空白、不得重複。',
+  body: d => Array.from({ length:d.n }, (_, i) =>
+      '<label>第 ' + (i + 1) + ' 項</label><input type="text" class="f" value="' +
+      esc(d.names[i] || '') + '">').join(''),
+  commit: d => {
+    const vals = $$('.f').map(e => e.value.trim());
+    if (vals.some(v => v === '')) return '各項名稱不得空白';
+    if (new Set(vals).size !== vals.length) return '各項名稱不得重複';
+    d.names = vals; return null; } },
+
+{ /* Q3 */ title:'Q3　本表配分合計為幾分？', hint:'預設 100 分。遇有加分項或非百分制的評分表，於此改為該表實際的配分合計。',
+  body: d => '<input type="number" id="f" min="1" max="1000" step="any" value="' + d.totalPoints + '">',
+  commit: d => {
+    const v = toNum($('#f').value);
+    if (!isFinite(v) || v <= 0 || v > 1000) return '配分合計須為 1 至 1000 之正數';
+    d.totalPoints = round2(v); return null; } },
+
+{ /* Q4 */ title:'Q4　依序輸入各項配分', hint:'各項配分加總須等於配分合計（V-05）。',
+  body: d => Array.from({ length:d.n }, (_, i) =>
+      '<label>' + esc(d.names[i]) + '</label><input type="number" class="f" min="0" step="any" value="' +
+      (d.maxScores[i] == null ? '' : d.maxScores[i]) + '">').join('') +
+      '<div class="msg" id="livesum"></div>',
+  after: d => {
+    const upd = () => {
+      const vals = $$('.f').map(e => toNum(e.value)).filter(isFinite);
+      const sum = round2(vals.reduce((a, b) => a + b, 0));
+      const box = $('#livesum');
+      box.className = 'msg ' + (sum === d.totalPoints ? 'ok' : 'warn');
+      box.textContent = '目前合計 ' + sum + ' 分／應為 ' + d.totalPoints + ' 分' +
+        (sum === d.totalPoints ? ' ✓' : '（相差 ' + round2(Math.abs(d.totalPoints - sum)) + ' 分）');
+    };
+    $$('.f').forEach(e => e.addEventListener('input', upd));
+    upd(); },
+  commit: d => {
+    const vals = $$('.f').map(e => toNum(e.value));
+    const r = validateAllotments(vals, d.totalPoints);
+    if (!r.ok) return r.msg;
+    d.maxScores = vals.map(round2); return null; } },
+
+{ /* Q5 */ title:'Q5　共有幾家廠商？名稱或代號為何？', hint:'1 至 20 家。名稱可用代號（甲、乙、丙）。',
+  body: d => '<label>廠商家數</label><input type="number" id="vc" min="1" max="20" step="1" value="' +
+      (d.vendorCount == null ? '' : d.vendorCount) + '"><div id="vlabels"></div>',
+  after: d => {
+    const build = () => {
+      const n = toNum($('#vc').value);
+      const box = $('#vlabels');
+      if (!Number.isInteger(n) || n < 1 || n > 20){ box.innerHTML = ''; return; }
+      box.innerHTML = Array.from({ length:n }, (_, i) =>
+        '<label>第 ' + (i + 1) + ' 家</label><input type="text" class="f" value="' +
+        esc(d.vendorLabels[i] || defaultLabel(i)) + '">').join('');
+    };
+    $('#vc').addEventListener('input', build);
+    build(); },
+  commit: d => {
+    const n = toNum($('#vc').value);
+    if (!Number.isInteger(n) || n < 1 || n > 20) return '廠商家數須為 1 至 20 之整數';
+    const vals = $$('.f').map(e => e.value.trim());
+    if (vals.some(v => v === '')) return '廠商名稱不得空白';
+    if (new Set(vals).size !== vals.length) return '廠商名稱不得重複';
+    d.vendorCount = n; d.vendorLabels = vals; return null; } },
+
+{ /* Q6 */ title:'Q6　及格門檻幾分？', hint:'須介於 0 至配分合計之間（V-06）。',
+  body: d => '<input type="number" id="f" min="0" max="' + d.totalPoints + '" step="any" value="' +
+      (d.passThreshold == null ? '' : d.passThreshold) + '">',
+  commit: d => {
+    const v = toNum($('#f').value);
+    if (!isFinite(v) || v < 0 || v > d.totalPoints)
+      return '門檻須介於 0 至 ' + d.totalPoints + ' 分';
+    d.passThreshold = round2(v); return null; } },
+
+{ /* Q7 */ title:'Q7　提醒區間寬度？', hint:'總分落在「門檻 至 門檻＋此寬度」時標 ⚠ 提醒確認。預設 2 分；填 0 則僅在總分恰等於門檻時提醒。',
+  body: d => '<input type="number" id="f" min="0" max="10" step="any" value="' + d.alertMargin + '">',
+  commit: d => {
+    const v = toNum($('#f').value);
+    if (!isFinite(v) || v < 0 || v > 10) return '提醒區間寬度須介於 0 至 10 分';
+    d.alertMargin = round2(v); return null; } },
+
+{ /* Q8 */ title:'Q8　是否為範例／教學用途？', hint:'啟用後，匯出檔案開頭強制加註「範例／模擬資料」，且不可關閉，避免日後被誤認為正式評選紀錄。',
+  body: d => '<label><input type="checkbox" id="f"' + (d.isSampleMode ? ' checked' : '') +
+      '> 是，本次為範例／教學用途</label>',
+  commit: d => { d.isSampleMode = $('#f').checked; return null; } }
+];
+
+function renderWizard(){
+  const d = wiz.d, s = STEPS[wiz.step];
+  app().innerHTML =
+    '<div class="card" id="wizcard">' +
+      '<h2>' + s.title + '</h2>' +
+      '<p class="hint">' + s.hint + '　（第 ' + (wiz.step + 1) + ' / ' + STEPS.length + ' 題）</p>' +
+      s.body(d) +
+      (wiz.error ? '<div class="msg bad">' + esc(wiz.error) + '</div>' : '') +
+      '<div class="actions">' +
+        (wiz.step > 0 ? '<button id="back">上一步</button>' : '') +
+        '<button class="primary" id="next">' +
+          (wiz.step === STEPS.length - 1 ? '完成設定' : '下一步') + '</button>' +
+      '</div>' +
+    '</div>';
+  if (s.after) s.after(d);
+  const first = $('#f') || $('#vc') || document.querySelector('.f');
+  if (first) first.focus();
+  const go = () => {
+    const err = s.commit(d);
+    if (err){ wiz.error = err; renderWizard(); return; }
+    wiz.error = '';
+    if (wiz.step === STEPS.length - 1) renderConfirm();
+    else { wiz.step++; renderWizard(); }
+  };
+  $('#next').addEventListener('click', go);
+  /* 監聽器掛在每次重建的 #wizcard 上，掛在 #app 會逐題累積 */
+  $('#wizcard').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox'){
+      e.preventDefault(); go();
+    }
+  });
+  if ($('#back')) $('#back').addEventListener('click', () => {
+    s.commit(d);            // 保留已填內容，不驗算
+    wiz.error = ''; wiz.step--; renderWizard();
+  });
+}
+
+/* 設定確認表 */
+function renderConfirm(){
+  const d = wiz.d;
+  app().innerHTML =
+    '<div class="card">' +
+      '<h2>設定確認表</h2>' +
+      '<p class="hint">請核對以下設定，確認後進入評分階段。</p>' +
+      (d.isSampleMode ? '<div class="sample-banner">' + SAMPLE_NOTE + '</div>' : '') +
+      '<table><tr><th>案名</th><td>' + (d.caseName ? esc(d.caseName) : '（未填）') + '</td></tr>' +
+      '<tr><th>配分合計</th><td>' + d.totalPoints + ' 分</td></tr>' +
+      '<tr><th>及格門檻</th><td>' + d.passThreshold + ' 分' +
+        (d.alertMargin > 0 ? '（提醒區間 ' + d.passThreshold + '–' +
+          round2(d.passThreshold + d.alertMargin) + '）' : '（不設提醒區間）') + '</td></tr>' +
+      '<tr><th>廠商</th><td>' + d.vendorCount + ' 家：' +
+        d.vendorLabels.map(esc).join('、') + '</td></tr></table>' +
+      '<table><tr><th>評分項目</th><th class="numcol">配分</th></tr>' +
+      d.names.map((n, i) => '<tr><td>' + esc(n) + '</td><td class="numcol">' +
+        d.maxScores[i] + '</td></tr>').join('') +
+      '<tr class="total-row"><td>合計</td><td class="numcol">' + d.totalPoints + '</td></tr></table>' +
+      '<div class="actions">' +
+        '<button id="edit">回去修改</button>' +
+        '<button class="primary" id="start">確認，開始評分</button>' +
+      '</div>' +
+    '</div>';
+  $('#edit').addEventListener('click', () => { wiz.step = 0; renderWizard(); });
+  $('#start').addEventListener('click', () => {
+    state = makeState({
+      caseName: d.caseName,
+      criteria: d.names.map((n, i) => ({ id:i + 1, name:n, maxScore:d.maxScores[i] })),
+      vendors:  d.vendorLabels.map((l, i) => ({ id:i + 1, label:l })),
+      totalPoints: d.totalPoints,
+      passThreshold: d.passThreshold,
+      alertMargin: d.alertMargin,
+      isSampleMode: d.isSampleMode
+    });
+    renderScoring();
+  });
+}
+
+/* ===================== 評分畫面 ===================== */
+function renderScoring(){
+  const cfg = state.config;
+  const head = '<th>項目</th><th class="numcol">配分</th>' +
+    cfg.vendors.map(v => '<th class="numcol">' + esc(v.label) + '</th>').join('');
+
+  const bodyRows = cfg.criteria.map(c =>
+    '<tr><td>' + esc(c.name) + '</td><td class="numcol">' + c.maxScore + '</td>' +
+    cfg.vendors.map(v =>
+      '<td class="numcol">' +
+        '<input class="score" type="text" inputmode="decimal" data-v="' + v.id + '" data-c="' + c.id + '">' +
+        '<select class="level" data-v="' + v.id + '" data-c="' + c.id + '" title="強弱標記（選用）">' +
+          '<option value="">—</option><option value="strong">強</option>' +
+          '<option value="mid">中</option><option value="weak">弱</option></select>' +
+        '<div class="err" data-err="' + ck(v.id, c.id) + '"></div>' +
+      '</td>').join('') + '</tr>').join('');
+
+  const totalRow = '<tr class="total-row"><td>合計（自動計算）</td><td class="numcol">' +
+    cfg.totalPoints + '</td>' + cfg.vendors.map(v =>
+      '<td class="numcol"><span data-total="' + v.id + '">0</span> ' +
+      '<span class="badge" data-badge="' + v.id + '"></span></td>').join('') + '</tr>';
+
+  const targetRow = '<tr><td>目標分（選用，可編輯）</td><td class="numcol"></td>' +
+    cfg.vendors.map(v => '<td class="numcol"><input class="score" type="text" inputmode="decimal" ' +
+      'data-target="' + v.id + '" placeholder="—"></td>').join('') + '</tr>';
+
+  const gapRow = '<tr><td>差距（目標分 − 合計）</td><td class="numcol"></td>' +
+    cfg.vendors.map(v => '<td class="numcol"><span class="gap" data-gap="' + v.id + '"></span></td>').join('') +
+    '</tr>';
+
+  app().innerHTML =
+    (cfg.isSampleMode ? '<div class="sample-banner">' + SAMPLE_NOTE + '</div>' : '') +
+    '<div class="card">' +
+      '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
+      '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
+        (cfg.alertMargin > 0 ? '（提醒區間 ' + cfg.passThreshold + '–' +
+          round2(cfg.passThreshold + cfg.alertMargin) + '）' : '') +
+        '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯</p>' +
+      '<label><input type="checkbox" id="togglelv"> 顯示強弱標記（選用，僅供一致性提示，不影響分數與匯出）</label>' +
+      '<div class="tablewrap"><table id="grid" class="hide-levels"><tr>' + head + '</tr>' +
+        bodyRows + totalRow + targetRow + gapRow + '</table></div>' +
+      '<div id="spaces"></div>' +
+      '<div id="warnings"></div>' +
+      '<div id="hints"></div>' +
+      '<div class="actions">' +
+        '<button class="primary" id="exp-csv">下載 CSV</button>' +
+        '<button class="primary" id="exp-md">下載 Markdown</button>' +
+        '<button id="exp-copy">複製到剪貼簿</button>' +
+        '<button class="danger" id="reset">全部重設</button>' +
+      '</div>' +
+      '<div id="exportmsg"></div>' +
+    '</div>';
+
+  $$('.score[data-c]').forEach(el => {
+    el.value = state.raw[ck(el.dataset.v, el.dataset.c)] || '';
+    el.addEventListener('input', () => {
+      state.raw[ck(el.dataset.v, el.dataset.c)] = el.value;
+      refresh();
+    });
+  });
+  $$('.level').forEach(el => {
+    el.value = state.levels[ck(el.dataset.v, el.dataset.c)] || '';
+    el.addEventListener('change', () => {
+      state.levels[ck(el.dataset.v, el.dataset.c)] = el.value;
+      refresh();
+    });
+  });
+  $$('[data-target]').forEach(el => {
+    el.value = state.rawTarget[el.dataset.target] || '';
+    el.addEventListener('input', () => {
+      state.rawTarget[el.dataset.target] = el.value;
+      refresh();
+    });
+  });
+  $('#togglelv').addEventListener('change', e => {
+    state.showLevels = e.target.checked;
+    $('#grid').classList.toggle('hide-levels', !state.showLevels);
+  });
+  $('#exp-csv').addEventListener('click', () => doExport('csv'));
+  $('#exp-md').addEventListener('click', () => doExport('md'));
+  $('#exp-copy').addEventListener('click', () => doExport('copy'));
+  $('#reset').addEventListener('click', doReset);
+
+  refresh();
+}
+
+/* 只更新推導出來的顯示，不重建輸入欄位（避免打字時失焦） */
+function refresh(){
+  const cfg = state.config;
+
+  for (const v of cfg.vendors){
+    for (const c of cfg.criteria){
+      const box = document.querySelector('[data-err="' + ck(v.id, c.id) + '"]');
+      const e = validateScore(state.raw[ck(v.id, c.id)], c.maxScore);
+      box.textContent = e || '';
+      const input = document.querySelector('.score[data-v="' + v.id + '"][data-c="' + c.id + '"]');
+      input.style.borderColor = e ? 'var(--bad)' : 'var(--line)';
+    }
+    const total = totalOf(state, v.id);
+    const s = statusOf(total, cfg.passThreshold, cfg.alertMargin);
+    document.querySelector('[data-total="' + v.id + '"]').textContent = total;
+    const badge = document.querySelector('[data-badge="' + v.id + '"]');
+    badge.className = 'badge ' + s;
+    badge.textContent = s === 'fail' ? '✕ 未達門檻'
+      : s === 'alert' ? '⚠ 落在提醒區間，請確認' : '';
+
+    const t = targetOf(state, v.id);
+    const gapEl = document.querySelector('[data-gap="' + v.id + '"]');
+    if (t === null){ gapEl.textContent = ''; gapEl.className = 'gap'; }
+    else {
+      const g = gapOf(t, total);
+      gapEl.className = 'gap' + (g === 0 ? ' zero' : '');
+      gapEl.textContent = g === 0 ? '✓ 已對齊' : signed(g);
+    }
+  }
+
+  /* F-05 可調整空間：僅顯示空間，不建議調整哪一項，亦不代為填入 */
+  $('#spaces').innerHTML = cfg.vendors.map(v => {
+    const t = targetOf(state, v.id);
+    if (t === null) return '';
+    const g = gapOf(t, totalOf(state, v.id));
+    if (g === 0) return '';
+    const up = g > 0;
+    return '<div class="space-block"><h3>' + esc(v.label) + '：可調整空間（差距 ' + signed(g) +
+      '）　※ 系統僅顯示空間，調整哪一項由您決定</h3>' +
+      '<table><tr><th>項目</th><th class="numcol">目前</th><th class="numcol">上限</th>' +
+      '<th class="numcol">' + (up ? '尚可加' : '尚可減') + '</th></tr>' +
+      cfg.criteria.map(c => {
+        const cur = scoreOf(state, v.id, c.id);
+        const now = cur === null ? 0 : cur;
+        const room = up ? round2(c.maxScore - now) : round2(now);
+        return '<tr><td>' + esc(c.name) + '</td><td class="numcol">' +
+          (cur === null ? '—' : cur) + '</td><td class="numcol">' + c.maxScore +
+          '</td><td class="numcol">' + (up ? '+' : '−') + room + '</td></tr>';
+      }).join('') + '</table></div>';
+  }).join('');
+
+  const errs = cellErrors(state);
+  $('#warnings').innerHTML = errs.length
+    ? '<div class="msg bad"><strong>請先修正以下輸入：</strong><ul class="plain">' +
+      errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>' : '';
+
+  const hints = consistencyHints(state);
+  $('#hints').innerHTML = hints.length
+    ? '<div class="msg warn"><strong>一致性提示（不阻擋作業）：</strong><ul class="plain">' +
+      hints.map(h => '<li>' + esc(h) + '</li>').join('') + '</ul></div>' : '';
+}
+
+/* ===================== 匯出（F-07） ===================== */
+function doExport(kind){
+  const box = $('#exportmsg');
+  const errs = cellErrors(state);
+  const missing = missingCells(state);
+  if (errs.length || missing.length){
+    box.innerHTML = '<div class="msg bad"><strong>無法匯出。</strong>' +
+      (errs.length ? '<div>輸入錯誤：</div><ul class="plain">' +
+        errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '') +
+      (missing.length ? '<div>尚未填寫：</div><ul class="plain">' +
+        missing.map(m => '<li>' + esc(m) + '</li>').join('') + '</ul>' : '') + '</div>';
+    return;
+  }
+  const now = new Date();
+  if (kind === 'csv'){
+    download(csvFilename(state, now), buildCsv(state), 'text/csv;charset=utf-8');
+    box.innerHTML = '<div class="msg ok">已下載 CSV（UTF-8 with BOM，Excel 開啟中文不亂碼）。</div>';
+  } else if (kind === 'md'){
+    download(mdFilename(state, now), buildMarkdown(state, now), 'text/markdown;charset=utf-8');
+    box.innerHTML = '<div class="msg ok">已下載 Markdown。</div>';
+  } else {
+    copyText(buildMarkdown(state, now)).then(ok => {
+      box.innerHTML = ok
+        ? '<div class="msg ok">已複製到剪貼簿，可直接貼入表單或文件。</div>'
+        : '<div class="msg bad">此瀏覽器不允許自動複製，請改用「下載 Markdown」。</div>';
+    });
+  }
+}
+
+function download(filename, text, mime){
+  const blob = new Blob([text], { type:mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* file:// 下 Clipboard API 未必可用，故保留 execCommand 備援 */
+function copyText(text){
+  if (navigator.clipboard && window.isSecureContext){
+    return navigator.clipboard.writeText(text).then(() => true, () => fallbackCopy(text));
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+function fallbackCopy(text){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.top = '-1000px';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+/* ===================== 全部重設（F-08） ===================== */
+function doReset(){
+  if (!window.confirm('將清除所有分數與設定，回到最初設定。此動作無法復原，確定嗎？')) return;
+  state = null;
+  wiz = newWiz();
+  renderWizard();
+}
+
+/* ===================== 自我測試（?selftest=1） ===================== */
+function sampleConfig(over){
+  const cfg = {
+    caseName:'測試案', totalPoints:100, passThreshold:80, alertMargin:2, isSampleMode:false,
+    criteria:[
+      { id:1, name:'提案之可行性及專業度', maxScore:50 },
+      { id:2, name:'民眾參與及教育推廣方案', maxScore:25 },
+      { id:3, name:'經費與進度合理性', maxScore:15 },
+      { id:4, name:'現場簡報答詢', maxScore:10 }],
+    vendors:[{ id:1, label:'甲' }, { id:2, label:'乙' }, { id:3, label:'丙' }]
+  };
+  return Object.assign(cfg, over || {});
+}
+function fill(st, vid, vals){
+  vals.forEach((v, i) => { st.raw[ck(vid, i + 1)] = String(v); });
+}
+
+function runSelfTest(){
+  const T = [];
+  const add = (id, desc, pass, got) => T.push({ id, desc, pass, got });
+
+  /* T-01 */ add('T-01', '配分 50/25/15/10，合計 100',
+    validateAllotments([50,25,15,10], 100).ok === true, '通過');
+  /* T-02 */ const r2 = validateAllotments([50,25,15,15], 100);
+  add('T-02', '配分 50/25/15/15，應阻擋並提示相差 5 分',
+    r2.ok === false && /相差 5 分/.test(r2.msg), r2.msg);
+  /* T-03 */ const e3 = validateScore('12', 10);
+  add('T-03', '上限 10 之項目輸入 12，應阻擋', e3 === '本項上限 10 分', e3);
+  /* T-04 */ const s4 = makeState(sampleConfig()); fill(s4, 1, [41,19,13,8]);
+  add('T-04', '輸入 41/19/13/8，總分應為 81', totalOf(s4, 1) === 81, totalOf(s4, 1));
+  /* T-05 */ add('T-05', '門檻 80、區間 2、總分 81 → ⚠',
+    statusOf(81, 80, 2) === 'alert', statusText(statusOf(81, 80, 2)));
+  /* T-06 */ add('T-06', '門檻 80、總分 78 → ✕',
+    statusOf(78, 80, 2) === 'fail', statusText(statusOf(78, 80, 2)));
+  /* T-07 */ add('T-07', '目標分 82、細項加總 79 → 差距 +3',
+    gapOf(82, 79) === 3, signed(gapOf(82, 79)));
+  /* T-08 */ const s8 = makeState(sampleConfig()); fill(s8, 1, [41,19,13,'']);
+  add('T-08', '某項留空，匯出前應偵測到缺漏',
+    missingCells(s8).length > 0, missingCells(s8).length + ' 處缺漏');
+  /* T-09 */ const s9 = makeState(sampleConfig({ isSampleMode:true }));
+  [1,2,3].forEach(v => fill(s9, v, [41,19,13,8]));
+  add('T-09', '範例模式匯出，須含模擬資料標記',
+    buildCsv(s9).indexOf(SAMPLE_NOTE) >= 0 && buildMarkdown(s9).indexOf(SAMPLE_NOTE) >= 0, '已加註');
+  /* T-10（DOM）*/ const totalCell = document.querySelector('[data-total="1"]');
+  add('T-10', '總分欄位唯讀，非可編輯輸入框',
+    !!totalCell && totalCell.tagName !== 'INPUT' &&
+    !document.querySelector('input[data-total]'), totalCell ? totalCell.tagName : '未渲染');
+  /* T-11 */ add('T-11', '配分合計覆寫為 110，各項 50/30/20/10',
+    validateAllotments([50,30,20,10], 110).ok === true, '通過');
+  /* T-12 */ const s12 = makeState(sampleConfig());
+  fill(s12, 1, [41,19,13,8]); fill(s12, 3, [44,21,13,8]);
+  s12.levels[ck(1,4)] = 'mid'; s12.levels[ck(3,4)] = 'weak';
+  const h12 = consistencyHints(s12);
+  add('T-12', '甲（中）8 分、丙（弱）8 分 → 一致性提示', h12.length === 1, h12[0] || '無提示');
+  /* T-13 */ const csv = buildCsv(s9);
+  add('T-13', 'CSV 首字元為 BOM、換行為 CRLF',
+    csv.charCodeAt(0) === 0xFEFF && !/[^\r]\n/.test(csv) && csv.indexOf('\r\n') > 0, '合格');
+
+  const passed = T.filter(t => t.pass).length;
+  app().innerHTML =
+    '<div class="card"><h2>自我測試結果</h2>' +
+    '<div class="msg ' + (passed === T.length ? 'ok' : 'bad') + '">' +
+      passed + ' / ' + T.length + ' 通過</div>' +
+    '<table><tr><th>編號</th><th>情境</th><th>結果</th><th>實際值</th></tr>' +
+    T.map(t => '<tr><td>' + t.id + '</td><td>' + esc(t.desc) + '</td><td>' +
+      (t.pass ? '✓ 通過' : '✕ 失敗') + '</td><td class="mono">' + esc(t.got) + '</td></tr>').join('') +
+    '</table>' +
+    '<div class="actions"><button class="primary" id="toapp">開始使用</button></div></div>';
+  $('#toapp').addEventListener('click', boot);
+}
+
+/* ===================== 啟動 ===================== */
+function boot(){
+  wiz = newWiz(); state = null;
+  renderWizard();
+}
+
+(function init(){
+  $('#ver').textContent = '版本 v' + APP_VERSION + '（' + APP_DATE + '）';
+  if (typeof Blob === 'undefined' || !window.URL || !URL.createObjectURL){
+    app().innerHTML = '<div class="card"><div class="msg bad">' +
+      '此瀏覽器版本過舊，不支援本工具所需的檔案匯出功能，請改用較新的瀏覽器。</div></div>';
+    return;
+  }
+  if (/[?&]selftest=1\b/.test(location.search)){
+    /* T-10 需在已渲染的評分畫面上檢查，故先以測試設定進入評分畫面 */
+    state = makeState(sampleConfig());
+    renderScoring();
+    runSelfTest();
+    return;
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
