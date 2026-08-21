@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>評選評分表驗算助手</title>
+<title>評選評分表計算工具（教學測試用）</title>
 <style>
 :root{
   --bg:#f6f7f9; --card:#fff; --line:#d8dce2; --text:#1c1f23; --muted:#616b78;
@@ -35,6 +35,10 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.primary:hover{filter:brightness(1.1)}
 button.danger{color:var(--bad);border-color:var(--bad)}
 .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.actions.right{justify-content:flex-end}
+/* 標題列：標題與說明靠左，全部重設靠右 */
+.cardhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.cardhead .hint{margin-bottom:8px}
 .msg{margin-top:10px;padding:8px 10px;border-radius:4px;font-size:14px}
 .msg.bad{background:#fdecea;color:var(--bad)}
 .msg.warn{background:#fdf3e0;color:var(--warn)}
@@ -51,14 +55,16 @@ tr.total-row td{background:var(--readonly);font-weight:700}
 .err{color:var(--bad);font-size:12px;margin-top:2px}
 .badge{font-size:13px;font-weight:400;white-space:nowrap}
 .badge.fail{color:var(--bad)}
-.badge.alert{color:var(--warn)}
 .badge.pass{color:var(--ok)}
 .gap{font-weight:700}
 .gap.zero{color:var(--ok)}
-.space-block{margin-top:14px;border-top:1px dashed var(--line);padding-top:10px}
-.space-block h3{font-size:14px;margin:0 0 4px}
-.sample-banner{background:#fdf3e0;color:var(--warn);border:1px solid #e3c98a;
-  padding:8px 12px;border-radius:4px;margin-bottom:16px;font-weight:600}
+/* 目標分為選填欄位，用底色與框線標出來，讓人看得出這裡可以打字 */
+tr.target-row td{background:#eaf2fb}
+tr.target-row input[data-target]{border:2px solid var(--accent);background:#fff;font-weight:600}
+tr.target-row input[data-target]::placeholder{color:var(--accent);font-weight:400;opacity:.65}
+.fillbtn{display:block;margin:4px 0 0 auto;padding:3px 8px;font-size:12px;
+  border-color:var(--accent);color:var(--accent)}
+.fillbtn:disabled{border-color:var(--line);color:var(--muted);cursor:not-allowed;background:#f6f7f9}
 ul.plain{margin:6px 0 0;padding-left:20px}
 ul.plain li{margin:2px 0}
 .mono{font-family:Consolas,"Courier New",monospace;font-size:13px}
@@ -66,8 +72,8 @@ ul.plain li{margin:2px 0}
 </head>
 <body>
 <header>
-  <h1>評選評分表驗算助手</h1>
-  <div class="sub">逐項填、自動加總、當場抓錯。純前端、可離線、不連網、不存檔。</div>
+  <h1>評選評分表計算工具（教學測試用）</h1>
+  <div class="sub">本工具僅提供分數計算與驗算，供教學與測試使用，非正式評選系統。</div>
 </header>
 <main id="app"></main>
 <footer>
@@ -78,9 +84,8 @@ ul.plain li{margin:2px 0}
 "use strict";
 
 /* ===================== 常數 ===================== */
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const APP_DATE    = '2026-08-21';
-const SAMPLE_NOTE = '※ 本表為範例／模擬資料，非實際評選結果';
 const LEVEL_RANK  = { strong:3, mid:2, weak:1 };
 const LEVEL_LABEL = { strong:'強', mid:'中', weak:'弱' };
 const STEM        = '甲乙丙丁戊己庚辛壬癸';
@@ -154,17 +159,33 @@ function totalOf(st, vid){
 }
 
 /* F-04 門檻標示 */
-function statusOf(total, threshold, margin){
-  if (total < threshold) return 'fail';
-  if (total <= threshold + margin) return 'alert';
-  return 'pass';
+function statusOf(total, threshold){
+  return total < threshold ? 'fail' : 'pass';
 }
-function statusText(s){
-  return s === 'fail' ? '未達門檻' : s === 'alert' ? '提醒區間' : '通過';
-}
+function statusText(s){ return s === 'fail' ? '未達門檻' : '通過'; }
 
 /* F-05：差距 ＝ 目標分 − 合計 */
 function gapOf(target, total){ return round2(target - total); }
+
+/* F-09 依配分比例帶入：把目標分按各項配分比例拆開，回傳建議值陣列。
+   僅在委員自行按下按鈕時呼叫，不會自動觸發；帶入後仍可逐項修改。
+   四捨五入造成的尾差補到配分最大且仍有空間的那一項，確保加總等於目標分。 */
+function proportionalSplit(criteria, totalPoints, target){
+  const vals = criteria.map(c => round2(target * c.maxScore / totalPoints));
+  let diff = round2(target - vals.reduce((a, b) => a + b, 0));
+  if (diff !== 0){
+    const order = criteria.map((c, i) => i).sort((a, b) => criteria[b].maxScore - criteria[a].maxScore);
+    for (const i of order){
+      const room = diff > 0 ? round2(criteria[i].maxScore - vals[i]) : vals[i];
+      const step = diff > 0 ? Math.min(diff, room) : Math.max(diff, -room);
+      if (step === 0) continue;
+      vals[i] = round2(vals[i] + step);
+      diff = round2(diff - step);
+      if (diff === 0) break;
+    }
+  }
+  return vals;
+}
 
 function targetOf(st, vid){
   const s = String(st.rawTarget[vid] || '').trim();
@@ -227,7 +248,7 @@ function rankLine(st){
   const cfg = st.config;
   const rows = cfg.vendors.map(v => {
     const t = totalOf(st, v.id);
-    return { label:v.label, total:t, st:statusOf(t, cfg.passThreshold, cfg.alertMargin) };
+    return { label:v.label, total:t, st:statusOf(t, cfg.passThreshold) };
   }).sort((a, b) => b.total - a.total);
   return rows.map(r => r.label + '（' + r.total + (r.st === 'fail' ? '，不入選' : '') + '）')
              .join('→ ');
@@ -242,7 +263,6 @@ function csvCell(s){
 /* CSV：UTF-8 with BOM、CRLF；不加 BOM 時 Windows 版 Excel 開中文會亂碼 */
 function buildCsv(st){
   const cfg = st.config, rows = [];
-  if (cfg.isSampleMode) rows.push([SAMPLE_NOTE]);
   rows.push(['項目', '配分'].concat(cfg.vendors.map(v => v.label)));
   for (const c of cfg.criteria){
     rows.push([c.name, c.maxScore].concat(
@@ -257,7 +277,7 @@ function buildCsv(st){
       targets[i] === null ? '' : gapOf(targets[i], totalOf(st, v.id)))));
   }
   rows.push(['狀態', ''].concat(cfg.vendors.map(v =>
-    statusText(statusOf(totalOf(st, v.id), cfg.passThreshold, cfg.alertMargin)))));
+    statusText(statusOf(totalOf(st, v.id), cfg.passThreshold)))));
 
   return '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
@@ -268,11 +288,9 @@ function buildMarkdown(st, now){
   const time = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   const L = [];
-  if (cfg.isSampleMode) L.push(SAMPLE_NOTE, '');
   L.push('## 評分表' + (cfg.caseName ? '：' + cfg.caseName : ''), '');
   L.push('匯出時間：' + time);
-  L.push('及格門檻：' + cfg.passThreshold + ' 分' + (cfg.alertMargin > 0
-    ? '（提醒區間 ' + cfg.passThreshold + '–' + round2(cfg.passThreshold + cfg.alertMargin) + '）' : ''));
+  L.push('及格門檻：' + cfg.passThreshold + ' 分');
   L.push('');
   L.push('| 項目 | 配分 | ' + cfg.vendors.map(v => v.label).join(' | ') + ' |');
   L.push('|---|---|' + cfg.vendors.map(() => '---|').join(''));
@@ -281,15 +299,13 @@ function buildMarkdown(st, now){
       cfg.vendors.map(v => { const s = scoreOf(st, v.id, c.id); return s === null ? '' : s; }).join(' | ') + ' |');
   }
   L.push('| **合計** | **' + cfg.totalPoints + '** | ' + cfg.vendors.map(v => {
-    const t = statusOf(totalOf(st, v.id), cfg.passThreshold, cfg.alertMargin);
-    return '**' + totalOf(st, v.id) + '**' + (t === 'fail' ? ' ✕' : t === 'alert' ? ' ⚠' : '');
+    const t = statusOf(totalOf(st, v.id), cfg.passThreshold);
+    return '**' + totalOf(st, v.id) + '**' + (t === 'fail' ? ' ✕' : '');
   }).join(' | ') + ' |');
   L.push('');
   for (const v of cfg.vendors){
-    const t = totalOf(st, v.id), s = statusOf(t, cfg.passThreshold, cfg.alertMargin);
-    if (s === 'alert') L.push('⚠ ' + v.label + ' ' + t + ' 分，落在提醒區間（' +
-      cfg.passThreshold + '–' + round2(cfg.passThreshold + cfg.alertMargin) + '）');
-    if (s === 'fail')  L.push('✕ ' + v.label + ' ' + t + ' 分，未達門檻 ' + cfg.passThreshold + ' 分');
+    const t = totalOf(st, v.id), s = statusOf(t, cfg.passThreshold);
+    if (s === 'fail') L.push('✕ ' + v.label + ' ' + t + ' 分，未達門檻 ' + cfg.passThreshold + ' 分');
   }
   const withTarget = cfg.vendors.filter(v => targetOf(st, v.id) !== null);
   if (withTarget.length){
@@ -329,7 +345,7 @@ let wiz = null;
 function newWiz(){
   return { step:0, error:'', d:{
     caseName:'', n:null, names:[], totalPoints:100, maxScores:[],
-    vendorCount:null, vendorLabels:[], passThreshold:null, alertMargin:2, isSampleMode:false
+    vendorCount:null, vendorLabels:[], passThreshold:null
   }};
 }
 function defaultLabel(i){ return i < STEM.length ? STEM[i] : '廠商' + (i + 1); }
@@ -416,19 +432,7 @@ const STEPS = [
     const v = toNum($('#f').value);
     if (!isFinite(v) || v < 0 || v > d.totalPoints)
       return '門檻須介於 0 至 ' + d.totalPoints + ' 分';
-    d.passThreshold = round2(v); return null; } },
-
-{ /* Q7 */ title:'Q7　提醒區間寬度？', hint:'總分落在「門檻 至 門檻＋此寬度」時標 ⚠ 提醒確認。預設 2 分；填 0 則僅在總分恰等於門檻時提醒。',
-  body: d => '<input type="number" id="f" min="0" max="10" step="any" value="' + d.alertMargin + '">',
-  commit: d => {
-    const v = toNum($('#f').value);
-    if (!isFinite(v) || v < 0 || v > 10) return '提醒區間寬度須介於 0 至 10 分';
-    d.alertMargin = round2(v); return null; } },
-
-{ /* Q8 */ title:'Q8　是否為範例／教學用途？', hint:'啟用後，匯出檔案開頭強制加註「範例／模擬資料」，且不可關閉，避免日後被誤認為正式評選紀錄。',
-  body: d => '<label><input type="checkbox" id="f"' + (d.isSampleMode ? ' checked' : '') +
-      '> 是，本次為範例／教學用途</label>',
-  commit: d => { d.isSampleMode = $('#f').checked; return null; } }
+    d.passThreshold = round2(v); return null; } }
 ];
 
 function renderWizard(){
@@ -475,12 +479,10 @@ function renderConfirm(){
     '<div class="card">' +
       '<h2>設定確認表</h2>' +
       '<p class="hint">請核對以下設定，確認後進入評分階段。</p>' +
-      (d.isSampleMode ? '<div class="sample-banner">' + SAMPLE_NOTE + '</div>' : '') +
       '<table><tr><th>案名</th><td>' + (d.caseName ? esc(d.caseName) : '（未填）') + '</td></tr>' +
       '<tr><th>配分合計</th><td>' + d.totalPoints + ' 分</td></tr>' +
       '<tr><th>及格門檻</th><td>' + d.passThreshold + ' 分' +
-        (d.alertMargin > 0 ? '（提醒區間 ' + d.passThreshold + '–' +
-          round2(d.passThreshold + d.alertMargin) + '）' : '（不設提醒區間）') + '</td></tr>' +
+        '</td></tr>' +
       '<tr><th>廠商</th><td>' + d.vendorCount + ' 家：' +
         d.vendorLabels.map(esc).join('、') + '</td></tr></table>' +
       '<table><tr><th>評分項目</th><th class="numcol">配分</th></tr>' +
@@ -499,9 +501,7 @@ function renderConfirm(){
       criteria: d.names.map((n, i) => ({ id:i + 1, name:n, maxScore:d.maxScores[i] })),
       vendors:  d.vendorLabels.map((l, i) => ({ id:i + 1, label:l })),
       totalPoints: d.totalPoints,
-      passThreshold: d.passThreshold,
-      alertMargin: d.alertMargin,
-      isSampleMode: d.isSampleMode
+      passThreshold: d.passThreshold
     });
     renderScoring();
   });
@@ -529,33 +529,35 @@ function renderScoring(){
       '<td class="numcol"><span data-total="' + v.id + '">0</span> ' +
       '<span class="badge" data-badge="' + v.id + '"></span></td>').join('') + '</tr>';
 
-  const targetRow = '<tr><td>目標分（選用，可編輯）</td><td class="numcol"></td>' +
+  const targetRow = '<tr class="target-row"><td>目標分（選用，可編輯）</td><td class="numcol"></td>' +
     cfg.vendors.map(v => '<td class="numcol"><input class="score" type="text" inputmode="decimal" ' +
-      'data-target="' + v.id + '" placeholder="—"></td>').join('') + '</tr>';
+      'data-target="' + v.id + '" placeholder="可輸入">' +
+      '<button class="fillbtn" data-fill="' + v.id + '" disabled>依配分比例帶入</button></td>')
+      .join('') + '</tr>';
 
   const gapRow = '<tr><td>差距（目標分 − 合計）</td><td class="numcol"></td>' +
     cfg.vendors.map(v => '<td class="numcol"><span class="gap" data-gap="' + v.id + '"></span></td>').join('') +
     '</tr>';
 
   app().innerHTML =
-    (cfg.isSampleMode ? '<div class="sample-banner">' + SAMPLE_NOTE + '</div>' : '') +
     '<div class="card">' +
-      '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
-      '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
-        (cfg.alertMargin > 0 ? '（提醒區間 ' + cfg.passThreshold + '–' +
-          round2(cfg.passThreshold + cfg.alertMargin) + '）' : '') +
-        '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯</p>' +
+      '<div class="cardhead">' +
+        '<div>' +
+          '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
+          '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
+            '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯</p>' +
+        '</div>' +
+        '<button class="danger" id="reset">全部重設</button>' +
+      '</div>' +
       '<label><input type="checkbox" id="togglelv"> 顯示強弱標記（選用，僅供一致性提示，不影響分數與匯出）</label>' +
       '<div class="tablewrap"><table id="grid" class="hide-levels"><tr>' + head + '</tr>' +
         bodyRows + totalRow + targetRow + gapRow + '</table></div>' +
-      '<div id="spaces"></div>' +
       '<div id="warnings"></div>' +
       '<div id="hints"></div>' +
-      '<div class="actions">' +
-        '<button class="primary" id="exp-csv">下載 CSV</button>' +
-        '<button class="primary" id="exp-md">下載 Markdown</button>' +
+      '<div class="actions right">' +
         '<button id="exp-copy">複製到剪貼簿</button>' +
-        '<button class="danger" id="reset">全部重設</button>' +
+        '<button class="primary" id="exp-md">下載 Markdown</button>' +
+        '<button class="primary" id="exp-csv">下載 CSV</button>' +
       '</div>' +
       '<div id="exportmsg"></div>' +
     '</div>';
@@ -581,6 +583,7 @@ function renderScoring(){
       refresh();
     });
   });
+  $$('[data-fill]').forEach(btn => btn.addEventListener('click', () => doFill(btn.dataset.fill)));
   $('#togglelv').addEventListener('change', e => {
     state.showLevels = e.target.checked;
     $('#grid').classList.toggle('hide-levels', !state.showLevels);
@@ -606,12 +609,12 @@ function refresh(){
       input.style.borderColor = e ? 'var(--bad)' : 'var(--line)';
     }
     const total = totalOf(state, v.id);
-    const s = statusOf(total, cfg.passThreshold, cfg.alertMargin);
+    const s = statusOf(total, cfg.passThreshold);
     document.querySelector('[data-total="' + v.id + '"]').textContent = total;
     const badge = document.querySelector('[data-badge="' + v.id + '"]');
     badge.className = 'badge ' + s;
     badge.textContent = s === 'fail' ? '✕ 未達門檻'
-      : s === 'alert' ? '⚠ 落在提醒區間，請確認' : '';
+      : '';
 
     const t = targetOf(state, v.id);
     const gapEl = document.querySelector('[data-gap="' + v.id + '"]');
@@ -623,27 +626,6 @@ function refresh(){
     }
   }
 
-  /* F-05 可調整空間：僅顯示空間，不建議調整哪一項，亦不代為填入 */
-  $('#spaces').innerHTML = cfg.vendors.map(v => {
-    const t = targetOf(state, v.id);
-    if (t === null) return '';
-    const g = gapOf(t, totalOf(state, v.id));
-    if (g === 0) return '';
-    const up = g > 0;
-    return '<div class="space-block"><h3>' + esc(v.label) + '：可調整空間（差距 ' + signed(g) +
-      '）　※ 系統僅顯示空間，調整哪一項由您決定</h3>' +
-      '<table><tr><th>項目</th><th class="numcol">目前</th><th class="numcol">上限</th>' +
-      '<th class="numcol">' + (up ? '尚可加' : '尚可減') + '</th></tr>' +
-      cfg.criteria.map(c => {
-        const cur = scoreOf(state, v.id, c.id);
-        const now = cur === null ? 0 : cur;
-        const room = up ? round2(c.maxScore - now) : round2(now);
-        return '<tr><td>' + esc(c.name) + '</td><td class="numcol">' +
-          (cur === null ? '—' : cur) + '</td><td class="numcol">' + c.maxScore +
-          '</td><td class="numcol">' + (up ? '+' : '−') + room + '</td></tr>';
-      }).join('') + '</table></div>';
-  }).join('');
-
   const errs = cellErrors(state);
   $('#warnings').innerHTML = errs.length
     ? '<div class="msg bad"><strong>請先修正以下輸入：</strong><ul class="plain">' +
@@ -653,6 +635,33 @@ function refresh(){
   $('#hints').innerHTML = hints.length
     ? '<div class="msg warn"><strong>一致性提示（不阻擋作業）：</strong><ul class="plain">' +
       hints.map(h => '<li>' + esc(h) + '</li>').join('') + '</ul></div>' : '';
+
+  /* 沒填目標分就沒有東西可拆，按鈕保持停用 */
+  $$('[data-fill]').forEach(btn => {
+    btn.disabled = targetOf(state, btn.dataset.fill) === null;
+  });
+}
+
+/* F-09：依配分比例帶入。只在按下按鈕時執行，帶入後委員仍可逐項修改。 */
+function doFill(vid){
+  const cfg = state.config;
+  const target = targetOf(state, vid);
+  if (target === null) return;
+  const label = cfg.vendors.filter(v => String(v.id) === String(vid))[0].label;
+  const hasScores = cfg.criteria.some(c => scoreOf(state, vid, c.id) !== null);
+  if (hasScores && !window.confirm(
+      '將依配分比例重新帶入「' + label + '」的各項分數，原本填的分數會被覆蓋。確定嗎？')) return;
+
+  const vals = proportionalSplit(cfg.criteria, cfg.totalPoints, target);
+  cfg.criteria.forEach((c, i) => {
+    state.raw[ck(vid, c.id)] = String(vals[i]);
+    const el = document.querySelector('.score[data-v="' + vid + '"][data-c="' + c.id + '"]');
+    if (el) el.value = String(vals[i]);
+  });
+  refresh();
+  $('#exportmsg').innerHTML = '<div class="msg warn">已依配分比例帶入「' + esc(label) +
+    '」的各項分數。<strong>這是機械式的比例拆分，不是評分</strong>——請逐項對照你對提案的判斷自行調整，' +
+    '再行匯出。</div>';
 }
 
 /* ===================== 匯出（F-07） ===================== */
@@ -722,7 +731,7 @@ function doReset(){
 /* ===================== 自我測試（?selftest=1） ===================== */
 function sampleConfig(over){
   const cfg = {
-    caseName:'測試案', totalPoints:100, passThreshold:80, alertMargin:2, isSampleMode:false,
+    caseName:'測試案', totalPoints:100, passThreshold:80,
     criteria:[
       { id:1, name:'提案之可行性及專業度', maxScore:50 },
       { id:2, name:'民眾參與及教育推廣方案', maxScore:25 },
@@ -749,19 +758,17 @@ function runSelfTest(){
   add('T-03', '上限 10 之項目輸入 12，應阻擋', e3 === '本項上限 10 分', e3);
   /* T-04 */ const s4 = makeState(sampleConfig()); fill(s4, 1, [41,19,13,8]);
   add('T-04', '輸入 41/19/13/8，總分應為 81', totalOf(s4, 1) === 81, totalOf(s4, 1));
-  /* T-05 */ add('T-05', '門檻 80、區間 2、總分 81 → ⚠',
-    statusOf(81, 80, 2) === 'alert', statusText(statusOf(81, 80, 2)));
+  /* T-05 */ add('T-05', '門檻 80、總分恰為 80 → 通過',
+    statusOf(80, 80) === 'pass', statusText(statusOf(80, 80)));
   /* T-06 */ add('T-06', '門檻 80、總分 78 → ✕',
-    statusOf(78, 80, 2) === 'fail', statusText(statusOf(78, 80, 2)));
+    statusOf(78, 80) === 'fail', statusText(statusOf(78, 80)));
   /* T-07 */ add('T-07', '目標分 82、細項加總 79 → 差距 +3',
     gapOf(82, 79) === 3, signed(gapOf(82, 79)));
   /* T-08 */ const s8 = makeState(sampleConfig()); fill(s8, 1, [41,19,13,'']);
   add('T-08', '某項留空，匯出前應偵測到缺漏',
     missingCells(s8).length > 0, missingCells(s8).length + ' 處缺漏');
-  /* T-09 */ const s9 = makeState(sampleConfig({ isSampleMode:true }));
+  const s9 = makeState(sampleConfig());
   [1,2,3].forEach(v => fill(s9, v, [41,19,13,8]));
-  add('T-09', '範例模式匯出，須含模擬資料標記',
-    buildCsv(s9).indexOf(SAMPLE_NOTE) >= 0 && buildMarkdown(s9).indexOf(SAMPLE_NOTE) >= 0, '已加註');
   /* T-10（DOM）*/ const totalCell = document.querySelector('[data-total="1"]');
   add('T-10', '總分欄位唯讀，非可編輯輸入框',
     !!totalCell && totalCell.tagName !== 'INPUT' &&
@@ -776,6 +783,14 @@ function runSelfTest(){
   /* T-13 */ const csv = buildCsv(s9);
   add('T-13', 'CSV 首字元為 BOM、換行為 CRLF',
     csv.charCodeAt(0) === 0xFEFF && !/[^\r]\n/.test(csv) && csv.indexOf('\r\n') > 0, '合格');
+  /* T-14 */ const cr14 = sampleConfig().criteria;   // 配分 50/25/15/10
+  const sp14 = proportionalSplit(cr14, 100, 85);
+  add('T-14', '目標分 85 依配分比例拆分，加總須等於 85 且不超過各項上限',
+    round2(sp14.reduce((a, b) => a + b, 0)) === 85 &&
+    sp14.every((v, i) => v >= 0 && v <= cr14[i].maxScore), sp14.join(' / '));
+  /* T-15 */ const sp15 = proportionalSplit(cr14, 100, 83);
+  add('T-15', '拆分產生小數尾差時仍須補平至目標分',
+    round2(sp15.reduce((a, b) => a + b, 0)) === 83, sp15.join(' / '));
 
   const passed = T.filter(t => t.pass).length;
   app().innerHTML =
