@@ -36,9 +36,12 @@ button.primary:hover{filter:brightness(1.1)}
 button.danger{color:var(--bad);border-color:var(--bad)}
 .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .actions.right{justify-content:flex-end}
-/* 標題列：標題與說明靠左，全部重設靠右 */
+/* 標題列：標題與說明靠左，清除分數按鈕靠右 */
 .cardhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.cardhead button{flex:none;white-space:nowrap}
 .cardhead .hint{margin-bottom:8px}
+.lvtoggle{font-weight:600;margin-bottom:2px}
+.lvhint{margin:0 0 10px 22px;max-width:760px}
 .msg{margin-top:10px;padding:8px 10px;border-radius:4px;font-size:14px}
 .msg.bad{background:#fdecea;color:var(--bad)}
 .msg.warn{background:#fdf3e0;color:var(--warn)}
@@ -84,7 +87,7 @@ ul.plain li{margin:2px 0}
 "use strict";
 
 /* ===================== 常數 ===================== */
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const APP_DATE    = '2026-08-21';
 const LEVEL_RANK  = { strong:3, mid:2, weak:1 };
 const LEVEL_LABEL = { strong:'強', mid:'中', weak:'弱' };
@@ -353,7 +356,7 @@ function defaultLabel(i){ return i < STEM.length ? STEM[i] : '廠商' + (i + 1);
 /* ===================== 設定精靈（F-01） ===================== */
 const STEPS = [
 { /* Q0 */ title:'Q0　案名？', hint:'可留空。僅用於匯出檔名與標題，不影響計算。',
-  body: d => '<input type="text" id="f" value="' + esc(d.caseName) + '" placeholder="例：潮州二期公共藝術 A-2">',
+  body: d => '<input type="text" id="f" value="' + esc(d.caseName) + '" placeholder="例：○○大樓興建工程">',
   commit: d => { d.caseName = $('#f').value.trim(); return null; } },
 
 { /* Q1 */ title:'Q1　共有幾個評分項目？', hint:'1 至 10 項。',
@@ -545,11 +548,16 @@ function renderScoring(){
         '<div>' +
           '<h2>' + (cfg.caseName ? esc(cfg.caseName) : '評分表') + '</h2>' +
           '<p class="hint">及格門檻 ' + cfg.passThreshold + ' 分' +
-            '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯</p>' +
+            '　｜　配分合計 ' + cfg.totalPoints + ' 分　｜　合計為系統計算，不可直接編輯' +
+            '<br>要重新設定評分項目或配分，請重新整理頁面（資料不會留存）</p>' +
         '</div>' +
-        '<button class="danger" id="reset">全部重設</button>' +
+        '<button class="danger" id="reset" title="只清除分數，設定保留">清除分數</button>' +
       '</div>' +
-      '<label><input type="checkbox" id="togglelv"> 顯示強弱標記（選用，僅供一致性提示，不影響分數與匯出）</label>' +
+      '<label class="lvtoggle"><input type="checkbox" id="togglelv"> ' +
+        '幫我檢查給分有沒有前後矛盾（選用）</label>' +
+      '<p class="hint lvhint">勾選後，每格分數旁會多一個「強／中／弱」小選單。' +
+        '假設你標甲這項「中」、乙這項「弱」，卻給乙比較高分，系統就會提醒你確認一下。' +
+        '標記純粹給你自己對照用，不影響任何計算，也不會出現在匯出的檔案裡。</p>' +
       '<div class="tablewrap"><table id="grid" class="hide-levels"><tr>' + head + '</tr>' +
         bodyRows + totalRow + targetRow + gapRow + '</table></div>' +
       '<div id="warnings"></div>' +
@@ -584,6 +592,9 @@ function renderScoring(){
     });
   });
   $$('[data-fill]').forEach(btn => btn.addEventListener('click', () => doFill(btn.dataset.fill)));
+  /* 重繪後沿用原本的開關狀態，避免清除分數時標記欄自己收起來 */
+  $('#togglelv').checked = state.showLevels;
+  $('#grid').classList.toggle('hide-levels', !state.showLevels);
   $('#togglelv').addEventListener('change', e => {
     state.showLevels = e.target.checked;
     $('#grid').classList.toggle('hide-levels', !state.showLevels);
@@ -591,7 +602,7 @@ function renderScoring(){
   $('#exp-csv').addEventListener('click', () => doExport('csv'));
   $('#exp-md').addEventListener('click', () => doExport('md'));
   $('#exp-copy').addEventListener('click', () => doExport('copy'));
-  $('#reset').addEventListener('click', doReset);
+  $('#reset').addEventListener('click', doClearScores);
 
   refresh();
 }
@@ -720,12 +731,17 @@ function fallbackCopy(text){
   return ok;
 }
 
-/* ===================== 全部重設（F-08） ===================== */
-function doReset(){
-  if (!window.confirm('將清除所有分數與設定，回到最初設定。此動作無法復原，確定嗎？')) return;
-  state = null;
-  wiz = newWiz();
-  renderWizard();
+/* ===================== 清除分數（F-08） =====================
+   只清掉填進去的東西，設定一律保留——現場最常見的是「這家重打一次」，
+   不是「整份重新設定」。要重設項目與配分，重新整理頁面即可。 */
+function doClearScores(){
+  if (!window.confirm('將清除所有已填分數、目標分與強弱標記。' +
+      '評分項目、配分、廠商與門檻等設定會保留。此動作無法復原，確定嗎？')) return;
+  state.raw = {};
+  state.rawTarget = {};
+  state.levels = {};
+  renderScoring();
+  $('#exportmsg').innerHTML = '<div class="msg ok">已清除所有分數，設定保留。</div>';
 }
 
 /* ===================== 自我測試（?selftest=1） ===================== */
